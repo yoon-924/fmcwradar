@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radar Object Detection (Web)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .chart-container { position: relative; width: 100%; max-width: 800px; margin: 0 auto; }
+        svg { background-color: white; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .drop-zone { transition: all 0.2s ease; }
+        .drop-zone.dragover { background-color: #e0e7ff; border-color: #4f46e5; }
+        
+        /* 라디오 버튼 커스텀 스타일 */
+        .lang-radio:checked + label {
+            background-color: #4f46e5;
+            color: white;
+            border-color: #4f46e5;
+        }
+    </style>
+</head>
+<body class="text-gray-800 antialiased p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <div class="col-span-1 space-y-6">
+            <div class="bg-white p-6 rounded-xl shadow-md">
+                <h1 class="text-2xl font-bold mb-4 text-gray-900">Radar Alert System</h1>
+                
+                <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer mb-4 hover:bg-gray-50">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                    <p class="mt-1 text-sm text-gray-600">
+                        <span class="font-medium text-indigo-600 hover:text-indigo-500">.dat 파일 선택</span> 혹은 드래그 앤 드롭
+                    </p>
+                    <input id="fileInput" type="file" accept=".dat" class="hidden" />
+                </div>
+
+                <div class="mb-6 p-4 border border-indigo-200 rounded-lg bg-indigo-50">
+                    <label class="block text-sm font-medium text-indigo-800 mb-2">Google Drive에서 데이터 불러오기</label>
+                    <div class="flex space-x-2">
+                        <select id="driveFileList" class="flex-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white">
+                            <option value="">파일 목록을 불러오는 중...</option>
+                        </select>
+                        <button id="loadDriveBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 text-sm font-medium whitespace-nowrap transition-colors">
+                            분석하기
+                        </button>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Voice Language / 음성 언어</label>
+                        <div class="flex space-x-2">
+                            <div class="flex-1">
+                                <input type="radio" id="lang-ko" name="language" value="ko" class="hidden lang-radio" checked>
+                                <label for="lang-ko" class="cursor-pointer block text-center w-full rounded-md border border-gray-300 py-2 text-sm font-medium hover:bg-gray-50 transition-colors">한국어</label>
+                            </div>
+                            <div class="flex-1">
+                                <input type="radio" id="lang-en" name="language" value="en" class="hidden lang-radio">
+                                <label for="lang-en" class="cursor-pointer block text-center w-full rounded-md border border-gray-300 py-2 text-sm font-medium hover:bg-gray-50 transition-colors">English</label>
+                            </div>
+                            <div class="flex-1">
+                                <input type="radio" id="lang-ja" name="language" value="ja" class="hidden lang-radio">
+                                <label for="lang-ja" class="cursor-pointer block text-center w-full rounded-md border border-gray-300 py-2 text-sm font-medium hover:bg-gray-50 transition-colors">日本語</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">CLUSTER_EPS (거리, m)</label>
+                        <input type="number" id="clusterEps" value="0.5" step="0.1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">MIN_POINTS_IN_CLUSTER (최소 점 개수)</label>
+                        <input type="number" id="minPoints" value="15" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border">
+                    </div>
+                </div>
+            </div>
+
+            <div id="alertBanner" class="p-6 rounded-xl shadow-md bg-gray-200 text-gray-700 transition-colors duration-300">
+                <h2 id="alertTitle" class="text-lg font-bold mb-2">상태 알림 / Status</h2>
+                <p id="alertMessage" class="text-xl font-semibold">대기 중... / Waiting...</p>
+                <p id="alertDetails" class="text-sm mt-2 opacity-80">파일을 업로드 해주세요.</p>
+            </div>
+        </div>
+
+        <div class="col-span-1 lg:col-span-2">
+            <div class="bg-white p-4 rounded-xl shadow-md h-full flex flex-col">
+                <h2 class="text-lg font-bold text-center mb-2">Radar Scatter Plot</h2>
+                <div id="chart" class="chart-container flex-grow relative"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 전역 설정 및 파라미터
+        const ROI_X_MIN = -1.0;
+        const ROI_X_MAX = 1.0;
+        const ROI_Y_MIN = 0.5;
+        const ROI_Y_MAX = 5.0;
+
+        // UI 요소
+        const fileInput = document.getElementById('fileInput');
+        const dropZone = document.getElementById('dropZone');
+        const alertBanner = document.getElementById('alertBanner');
+        const alertTitle = document.getElementById('alertTitle');
+        const alertMessage = document.getElementById('alertMessage');
+        const alertDetails = document.getElementById('alertDetails');
+        
+        // 다국어 메시지 딕셔너리
+        const messages = {
+            'ko': {
+                noData: "데이터가 없습니다.",
+                danger: "위험! 즉시 정지하세요.",
+                warning: "장애물 접근, 서행하세요.",
+                caution: "전방에 물체 감지.",
+                notice: "원거리에 장애물이 있습니다.",
+                safe: "장애물이 없습니다.",
+                detailAlert: (count, dist) => `🚨 물체 감지! (점 개수: ${count}개, 거리: ${dist}m)`,
+                detailSafe: (count) => `✅ 안전 주행 중... (의심 점: ${count}개이나 뭉치지 않음)`,
+                title: "상태 알림"
+            },
+            'en': {
+                noData: "No data available.",
+                danger: "Danger! Stop immediately.",
+                warning: "Obstacle approaching, slow down.",
+                caution: "Object detected ahead.",
+                notice: "Obstacle in the distance.",
+                safe: "No obstacles detected.",
+                detailAlert: (count, dist) => `🚨 Object Detected! (Points: ${count}, Distance: ${dist}m)`,
+                detailSafe: (count) => `✅ Driving safely... (${count} points found but not clustered)`,
+                title: "Status Alert"
+            },
+            'ja': {
+                noData: "データがありません。",
+                danger: "危険！直ちに停止してください。",
+                warning: "障害物接近、徐行してください。",
+                caution: "前方に物体を検知。",
+                notice: "遠方に障害物があります。",
+                safe: "障害物はありません。",
+                detailAlert: (count, dist) => `🚨 物体検知！ (点数: ${count}個, 距離: ${dist}m)`,
+                detailSafe: (count) => `✅ 安全走行中... (疑わしい点: ${count}個、クラスターなし)`,
+                title: "ステータス通知"
+            }
+        };
+
+        // TTS 언어 코드 매핑
+        const langCodes = { 'ko': 'ko-KR', 'en': 'en-US', 'ja': 'ja-JP' };
+
+        // 현재 선택된 언어 가져오기
+        function getCurrentLang() {
+            return document.querySelector('input[name="language"]:checked').value;
+        }
+
+        // ==========================================
+        // 1. 로컬 파일 업로드 이벤트 리스너
+        // ==========================================
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                processFile(e.dataTransfer.files[0]);
+            }
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) processFile(e.target.files[0]);
+        });
+
+        // 파일 읽기 및 파싱
+        function processFile(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const arrayBuffer = e.target.result;
+                const points = parseRadarData(arrayBuffer);
+                analyzeData(points);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ==========================================
+        // 2. 데이터 분석 로직 (파싱 및 DBSCAN)
+        // ==========================================
+        function parseRadarData(arrayBuffer) {
+            const points = [];
+            const view = new DataView(arrayBuffer);
+            const step = 16; 
+
+            for (let i = 0; i < view.byteLength - step; i += step) {
+                try {
+                    const x = view.getFloat32(i, true);
+                    const y = view.getFloat32(i + 4, true);
+                    
+                    if (Math.abs(x) < 15 && y > 0.1 && y < 20) {
+                        points.push({ x: x, y: y });
+                    }
+                } catch (err) {
+                    continue; 
+                }
+            }
+            return points;
+        }
+
+        function runDBSCAN(points, eps, minPts) {
+            const labels = new Array(points.length).fill(undefined);
+            let clusterId = 0;
+
+            function getNeighbors(pointIdx) {
+                const neighbors = [];
+                const p1 = points[pointIdx];
+                for (let i = 0; i < points.length; i++) {
+                    const p2 = points[i];
+                    const dist = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+                    if (dist <= eps) neighbors.push(i);
+                }
+                return neighbors;
+            }
+
+            for (let i = 0; i < points.length; i++) {
+                if (labels[i] !== undefined) continue;
+
+                const neighbors = getNeighbors(i);
+
+                if (neighbors.length < minPts) {
+                    labels[i] = -1;
+                    continue;
+                }
+
+                clusterId++;
+                labels[i] = clusterId;
+                const seedSet = neighbors.filter(n => n !== i);
+
+                for (let j = 0; j < seedSet.length; j++) {
+                    const currP = seedSet[j];
+                    if (labels[currP] === -1) labels[currP] = clusterId; 
+                    if (labels[currP] !== undefined) continue;
+                    
+                    labels[currP] = clusterId;
+                    const currNeighbors = getNeighbors(currP);
+                    
+                    if (currNeighbors.length >= minPts) {
+                        for(let k=0; k<currNeighbors.length; k++) {
+                            if(!seedSet.includes(currNeighbors[k])) {
+                                seedSet.push(currNeighbors[k]);
+                            }
+                        }
+                    }
+                }
+            }
+            return labels;
+        }
+
+        function analyzeData(points) {
+            const lang = getCurrentLang();
+            const msgDict = messages[lang];
+            alertTitle.innerText = msgDict.title;
+
+            if (points.length === 0) {
+                triggerAlert(msgDict.noData, "bg-gray-200", "text-gray-700", "");
+                speak(msgDict.noData, lang);
+                return;
+            }
+
+            const clusterEps = parseFloat(document.getElementById('clusterEps').value);
+            const minPointsInCluster = parseInt(document.getElementById('minPoints').value);
+
+            const targetPoints = points.filter(p => 
+                p.y > ROI_Y_MIN && p.y < ROI_Y_MAX && p.x > ROI_X_MIN && p.x < ROI_X_MAX
+            );
+
+            let bestCluster = null;
+            let maxCount = 0;
+            let validClusterPoints = [];
+
+            if (targetPoints.length >= minPointsInCluster) {
+                const labels = runDBSCAN(targetPoints, clusterEps, 5);
+                
+                const counts = {};
+                labels.forEach(label => {
+                    if (label !== -1) {
+                        counts[label] = (counts[label] || 0) + 1;
+                    }
+                });
+
+                let maxLabel = -1;
+                for (const label in counts) {
+                    if (counts[label] > maxCount) {
+                        maxCount = counts[label];
+                        maxLabel = parseInt(label);
+                    }
+                }
+
+                if (maxCount >= minPointsInCluster) {
+                    validClusterPoints = targetPoints.filter((_, idx) => labels[idx] === maxLabel);
+                    bestCluster = validClusterPoints;
+                }
+            }
+
+            if (bestCluster) {
+                const minDist = Math.min(...bestCluster.map(p => p.y));
+                let msg = "";
+                let bgColor = "";
+                let textColor = "text-white";
+
+                if (minDist <= 1.0) {
+                    msg = msgDict.danger;
+                    bgColor = "bg-red-600";
+                } else if (minDist > 1.0 && minDist <= 2.0) {
+                    msg = msgDict.warning;
+                    bgColor = "bg-orange-500";
+                } else if (minDist > 2.0 && minDist <= 3.5) {
+                    msg = msgDict.caution;
+                    bgColor = "bg-yellow-400";
+                    textColor = "text-gray-900";
+                } else if (minDist > 3.5 && minDist <= 5.0) {
+                    msg = msgDict.notice;
+                    bgColor = "bg-blue-500";
+                }
+
+                const detailMsg = msgDict.detailAlert(maxCount, minDist.toFixed(2));
+                triggerAlert(msg, bgColor, textColor, detailMsg);
+                speak(msg, lang);
+            } else {
+                const msg = msgDict.safe;
+                const detailMsg = msgDict.detailSafe(targetPoints.length);
+                triggerAlert(msg, "bg-green-500", "text-white", detailMsg);
+                speak(msg, lang);
+            }
+
+            drawChart(points, targetPoints, validClusterPoints);
+        }
+
+        function triggerAlert(msg, bgColor, textColor, details) {
+            alertBanner.className = `p-6 rounded-xl shadow-md transition-colors duration-300 ${bgColor} ${textColor}`;
+            alertMessage.innerText = msg;
+            alertDetails.innerText = details;
+        }
+
+        function speak(text, lang) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); 
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = langCodes[lang];
+                
+                if(lang === 'en') utterance.rate = 0.9;
+                else utterance.rate = 1.0;
+
+                window.speechSynthesis.speak(utterance);
+            } else {
+                console.warn("이 브라우저는 음성 합성을 지원하지 않습니다.");
+            }
+        }
+
+        // ==========================================
+        // 3. D3.js 렌더링 (차트 그리기)
+        // ==========================================
+        function drawChart(allPoints, roiPoints, clusterPoints) {
+            const container = document.getElementById('chart');
+            container.innerHTML = ""; 
+            
+            const margin = {top: 40, right: 40, bottom: 50, left: 50};
+            const width = container.clientWidth;
+            const height = 500; 
+            const innerWidth = width - margin.left - margin.right;
+            const innerHeight = height - margin.top - margin.bottom;
+
+            const svg = d3.select("#chart").append("svg")
+                .attr("width", "100%")
+                .attr("height", height)
+                .attr("viewBox", `0 0 ${width} ${height}`)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            const xScale = d3.scaleLinear().domain([-3, 3]).range([0, innerWidth]);
+            const yScale = d3.scaleLinear().domain([-0.5, 6.0]).range([innerHeight, 0]);
+
+            const xAxisGrid = d3.axisBottom(xScale).tickSize(-innerHeight).tickFormat('').ticks(10);
+            const yAxisGrid = d3.axisLeft(yScale).tickSize(-innerWidth).tickFormat('').ticks(10);
+            
+            svg.append('g').attr('class', 'grid text-gray-200 stroke-current opacity-30')
+               .attr('transform', `translate(0,${innerHeight})`).call(xAxisGrid);
+            svg.append('g').attr('class', 'grid text-gray-200 stroke-current opacity-30').call(yAxisGrid);
+
+            svg.append("g")
+                .attr("transform", `translate(0,${innerHeight})`)
+                .call(d3.axisBottom(xScale));
+            svg.append("g").call(d3.axisLeft(yScale));
+
+            svg.append("text").attr("text-anchor", "middle").attr("x", innerWidth/2).attr("y", innerHeight + 40).text("Left/Right (m)").style("font-size", "12px");
+            svg.append("text").attr("text-anchor", "middle").attr("transform", "rotate(-90)").attr("y", -35).attr("x", -innerHeight/2).text("Forward Distance (m)").style("font-size", "12px");
+
+            svg.append("text").attr("x", innerWidth/2).attr("y", -15).attr("text-anchor", "middle")
+               .style("font-size", "16px").style("font-weight", "bold")
+               .text(`Radar Clustering Plot`);
+
+            svg.append("line")
+               .attr("x1", 0).attr("x2", innerWidth)
+               .attr("y1", yScale(ROI_Y_MIN)).attr("y2", yScale(ROI_Y_MIN))
+               .attr("stroke", "red").attr("stroke-dasharray", "4").attr("stroke-width", 1).attr("opacity", 0.5);
+
+            svg.append("line")
+               .attr("x1", xScale(0)).attr("x2", xScale(0))
+               .attr("y1", 0).attr("y2", innerHeight)
+               .attr("stroke", "gray").attr("stroke-dasharray", "4").attr("stroke-width", 1).attr("opacity", 0.3);
+
+            svg.append('g').selectAll("dot")
+               .data(allPoints).enter().append("circle")
+               .attr("cx", d => xScale(d.x)).attr("cy", d => yScale(d.y))
+               .attr("r", 2).style("fill", "gray").style("opacity", 0.1);
+
+            if(roiPoints.length > 0) {
+                svg.append('g').selectAll("dot")
+                   .data(roiPoints).enter().append("circle")
+                   .attr("cx", d => xScale(d.x)).attr("cy", d => yScale(d.y))
+                   .attr("r", 3.5).style("fill", "#add8e6").style("opacity", 0.4);
+            }
+
+            if(clusterPoints.length > 0) {
+                svg.append('g').selectAll("dot")
+                   .data(clusterPoints).enter().append("circle")
+                   .attr("cx", d => xScale(d.x)).attr("cy", d => yScale(d.y))
+                   .attr("r", 6).style("fill", "red").style("stroke", "black")
+                   .style("stroke-width", 1).style("opacity", 0.9);
+            }
+
+            const sensorSymbol = d3.symbol().type(d3.symbolTriangle).size(150);
+            svg.append("path")
+               .attr("d", sensorSymbol)
+               .attr("transform", `translate(${xScale(0)},${yScale(0)})`)
+               .style("fill", "black");
+            
+            const legend = svg.append("g").attr("transform", `translate(${innerWidth - 180}, 10)`);
+            
+            legend.append("circle").attr("cx", 0).attr("cy", 0).attr("r", 3).style("fill", "gray").style("opacity", 0.5);
+            legend.append("text").attr("x", 10).attr("y", 4).text("Background Noise").style("font-size", "10px").attr("alignment-baseline","middle");
+            
+            legend.append("circle").attr("cx", 0).attr("cy", 20).attr("r", 3.5).style("fill", "#add8e6");
+            legend.append("text").attr("x", 10).attr("y", 24).text("Scattered Points (ROI)").style("font-size", "10px").attr("alignment-baseline","middle");
+            
+            legend.append("circle").attr("cx", 0).attr("cy", 40).attr("r", 5).style("fill", "red").style("stroke", "black");
+            legend.append("text").attr("x", 10).attr("y", 44).text("Detected Object").style("font-size", "10px").attr("alignment-baseline","middle");
+
+            legend.append("path").attr("d", d3.symbol().type(d3.symbolTriangle).size(50)).attr("transform", "translate(0,60)").style("fill", "black");
+            legend.append("text").attr("x", 10).attr("y", 64).text("Sensor (0,0)").style("font-size", "10px").attr("alignment-baseline","middle");
+        }
+
+        // 초기 빈 차트 그리기
+        drawChart([], [], []);
+
+
+        // ==========================================
+        // 4. 구글 드라이브 API 연동 (안전 버전)
+        // ==========================================
+        const API_KEY = 'AIzaSyB2knYbA-PO03ar2J8vBIHxVF4GyPrbzg8'; 
+        const FOLDER_ID = '1g8iD-fa8IGWqF7JM5k9mIWjNSdCLF5Xq';
+
+        const driveFileList = document.getElementById('driveFileList');
+        const loadDriveBtn = document.getElementById('loadDriveBtn');
+
+        // 드라이브 파일 목록 가져오기
+        async function fetchDriveFilesSafe() {
+            if (!driveFileList) return;
+            
+            const query = `'${FOLDER_ID}' in parents and trashed=false`;
+            const apiUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&key=${API_KEY}`;
+            
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    if(response.status === 403) throw new Error('API 권한 오류. 드라이브 폴더가 비공개 상태일 수 있습니다.');
+                    throw new Error(`Drive API 호출 실패 (${response.status})`);
+                }
+                
+                const data = await response.json();
+                const datFiles = data.files.filter(file => file.name.endsWith('.dat'));
+                
+                driveFileList.innerHTML = ''; 
+                
+                if (datFiles.length === 0) {
+                    driveFileList.innerHTML = '<option value="">해당 폴더에 .dat 파일이 없습니다.</option>';
+                    return;
+                }
+
+                datFiles.forEach(file => {
+                    const option = document.createElement('option');
+                    option.value = file.id; 
+                    option.textContent = file.name;
+                    driveFileList.appendChild(option);
+                });
+            } catch (error) {
+                console.warn("구글 드라이브 목록 로드 실패:", error);
+                driveFileList.innerHTML = '<option value="">폴더 접근 실패 (콘솔 에러 확인)</option>';
+            }
+        }
+
+        // 선택한 파일 다운로드 및 분석
+        if (loadDriveBtn) {
+            loadDriveBtn.addEventListener('click', async () => {
+                const fileId = driveFileList.value;
+                if (!fileId) {
+                    alert("파일을 먼저 선택해주세요.");
+                    return;
+                }
+
+                try {
+                    // UI 상태 업데이트
+                    alertMessage.innerText = "데이터 다운로드 중...";
+                    alertDetails.innerText = "구글 드라이브에서 가져오는 중...";
+                    alertBanner.className = "p-6 rounded-xl shadow-md transition-colors duration-300 bg-blue-100 text-blue-800";
+                    
+                    const downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${API_KEY}`;
+                    
+                    const response = await fetch(downloadUrl);
+                    if (!response.ok) throw new Error(`다운로드 실패 (${response.status})`);
+                    
+                    const arrayBuffer = await response.arrayBuffer();
+                    const points = parseRadarData(arrayBuffer);
+                    analyzeData(points); // 기존 원본 함수 그대로 사용하여 차트 렌더링
+                    
+                } catch (error) {
+                    console.error("파일 처리 중 에러:", error);
+                    alert("데이터를 다운로드하지 못했습니다. 브라우저 콘솔을 확인하세요.");
+                    
+                    // 에러 시 UI 복구
+                    alertMessage.innerText = "다운로드 에러";
+                    alertDetails.innerText = "파일을 가져오지 못했습니다.";
+                    alertBanner.className = "p-6 rounded-xl shadow-md transition-colors duration-300 bg-red-100 text-red-800";
+                }
+            });
+        }
+
+        // 페이지가 열리면 자동으로 구글 드라이브 목록을 불러옴
+        fetchDriveFilesSafe();
+
+    </script>
+</body>
+</html>
