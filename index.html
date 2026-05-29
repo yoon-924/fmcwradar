@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radar Object Detection - Separated Range (Flat 5m / Track 10m)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .chart-container { position: relative; width: 100%; max-width: 800px; margin: 0 auto; }
+        svg { background-color: white; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .drop-zone { transition: all 0.2s ease; }
+        .drop-zone.dragover { background-color: #e0e7ff; border-color: #4f46e5; }
+        
+        /* 라디오 버튼 커스텀 스타일 */
+        .lang-radio:checked + label {
+            background-color: #4f46e5;
+            color: white;
+            border-color: #4f46e5;
+        }
+    </style>
+</head>
+<body class="text-gray-800 antialiased p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <div class="col-span-1 space-y-6">
+            <div class="bg-white p-6 rounded-xl shadow-md">
+                <h1 class="text-2xl font-bold mb-4 text-gray-900">Radar Alert System</h1>
+                
+                <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer mb-4 hover:bg-gray-50">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                    <p class="mt-1 text-sm text-gray-600">
+                        <span class="font-medium text-indigo-600 hover:text-indigo-500">.dat 파일 선택</span> 혹은 드래그 앤 드롭
+                    </p>
+                    <input id="fileInput" type="file" accept=".dat" class="hidden" />
+                </div>
+
+                <div class="mb-6 p-4 border border-indigo-200 rounded-lg bg-indigo-50">
+                    <label class="block text-sm font-medium text-indigo-800 mb-2">Google Drive에서 데이터 불러오기</label>
+                    <div class="flex space-x-2">
+                        <select id="driveFileList" class="flex-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white">
+                            <option value="">파일 목록을 불러오는 중...</option>
+                        </select>
+                        <button id="loadDriveBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 text-sm font-medium whitespace-nowrap transition-colors">
+                            분석하기
+                        </button>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Voice Language / 음성 언어</label>
+                        <div class="flex space-x-2">
+                            <div class="flex-1">
+                                <input type="radio" id="lang-ko" name="language" value="ko" class="hidden lang-radio" checked>
+                                <label for="lang-ko" class="cursor-pointer block text-center w-full rounded-md border border-gray-300 py-2 text-sm font-medium hover:bg-gray-50 transition-colors">한국어</label>
+                            </div>
+                            <div class="flex-1">
+                                <input type="radio" id="lang-en" name="language" value="en" class="hidden lang-radio">
+                                <label for="lang-en" class="cursor-pointer block text-center w-full rounded-md border border-gray-300 py-2 text-sm font-medium hover:bg-gray-50 transition-colors">English</label>
+                            </div>
+                            <div class="flex-1">
+                                <input type="radio" id="lang-ja" name="language" value="ja" class="hidden lang-radio">
+                                <label for="lang-ja" class="cursor-pointer block text-center w-full rounded-md border border-gray-300 py-2 text-sm font-medium hover:bg-gray-50 transition-colors">日本語</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">CLUSTER_EPS (거리, m)</label>
+                        <input type="number" id="clusterEps" value="0.5" step="0.1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">MIN_POINTS_IN_CLUSTER (최소 점 개수)</label>
+                        <input type="number" id="minPoints" value="15" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border">
+                    </div>
+                </div>
+            </div>
+
+            <div id="alertBanner" class="p-6 rounded-xl shadow-md bg-gray-200 text-gray-700 transition-colors duration-300">
+                <h2 id="alertTitle" class="text-lg font-bold mb-2">상태 알림 / Status</h2>
+                <p id="alertMessage" class="text-xl font-semibold">대기 중... / Waiting...</p>
+                <p id="alertDetails" class="text-sm mt-2 opacity-80">파일을 업로드 해주세요.</p>
+            </div>
+        </div>
+
+        <div class="col-span-1 lg:col-span-2">
+            <div class="bg-white p-4 rounded-xl shadow-md h-full flex flex-col">
+                <h2 class="text-lg font-bold text-center mb-4 text-gray-800">Radar Scatter Plot (Top & Side View)</h2>
+                <div class="flex flex-col gap-6 flex-grow">
+                    
+                    <div class="flex flex-col h-[400px]">
+                        <h3 class="text-md font-semibold text-center text-gray-600 mb-2">Top-Down (X-Y)</h3>
+                        <div id="chartXY" class="chart-container flex-grow relative w-full h-full"></div>
+                    </div>
+                    
+                    <hr class="border-gray-200">
+                    
+                    <div class="flex flex-col h-[400px]">
+                        <h3 class="text-md font-semibold text-center text-gray-600 mb-2">Side-View (Y-Z)</h3>
+                        <div id="chartYZ" class="chart-container flex-grow relative w-full h-full"></div>
+                    </div>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-6xl mx-auto mt-6" id="framePlaybackSection" style="display:none;">
+        <div class="bg-white p-6 rounded-xl shadow-md border-t-4 border-indigo-500">
+            
+            <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between mb-4 gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-gray-900">⏱️ 실시간 프레임 동기화 트래킹 (Raw Points 10m)</h2>
+                    <p class="text-gray-500 text-sm mt-1">실제 프레임 데이터를 바탕으로 좌우 원시 점들의 궤적을 10m 범위로 시각화합니다.</p>
+                </div>
+                <div class="flex items-center gap-3 self-end md:self-auto bg-gray-100 p-2 rounded-lg">
+                    <button id="framePlayPauseBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow">
+                        ▶ 재생
+                    </button>
+                    <button id="frameStopBtn" class="bg-gray-500 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow">
+                        ■ 정지
+                    </button>
+                    <div class="flex items-center gap-1 text-sm font-medium text-gray-700 ml-2">
+                        FPS: <input type="number" id="frameFpsInput" value="10" min="1" max="60" class="w-14 bg-white border rounded text-center p-1 text-indigo-700">
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4 mb-6 bg-gray-50 p-4 rounded-lg">
+                <input type="range" id="frameSlider" value="0" min="0" max="0" class="flex-grow accent-indigo-600 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                <span id="frameCounter" class="text-sm font-bold text-indigo-600 whitespace-nowrap bg-white px-3 py-1 rounded shadow-sm border border-gray-200">0 / 0 Frame</span>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="border border-gray-200 rounded-xl bg-gray-50 p-4 flex flex-col">
+                    <h3 class="text-center font-semibold text-gray-700 mb-2">원시 데이터 포인트 (D3.js 10m)</h3>
+                    <div id="frameChart" class="w-full h-full flex-grow min-h-[400px]"></div>
+                </div>
+
+                <div class="bg-gray-900 rounded-xl shadow-inner flex flex-col p-4 border border-gray-800 relative overflow-hidden">
+                    <div class="flex items-center justify-between mb-3 border-b border-gray-700 pb-2">
+                        <h3 class="font-semibold text-white tracking-wide">🚘 차량 전방 대시보드 (최대 10m)</h3>
+                        <div id="speedBadge" class="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                            속도: 0.0 m/s
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-2 mb-2">
+                        <span class="text-[10px] text-gray-400 bg-gray-800 px-2 py-1 rounded">● 원시 데이터(Raw Point)</span>
+                        <span class="text-[10px] text-red-400 bg-gray-800 px-2 py-1 rounded">■ 추적 객체</span>
+                    </div>
+
+                    <div class="relative flex-grow min-h-[400px] flex items-center justify-center">
+                        <canvas id="trackingCanvas" class="w-full h-full rounded-lg" style="background:#0f172a;"></canvas>
+                    </div>
+                    
+                    <div class="mt-4 pt-3 border-t border-gray-700/50">
+                        <div class="flex gap-4">
+                            <div class="flex-1">
+                                <h4 class="text-[10px] text-gray-400 uppercase tracking-wider mb-1">탐지된 오브젝트</h4>
+                                <div id="objectTable" class="bg-gray-800/50 rounded p-2 h-20 overflow-y-auto font-mono"></div>
+                            </div>
+                            <div class="flex-1">
+                                <h4 class="text-[10px] text-gray-400 uppercase tracking-wider mb-1">경보 로그</h4>
+                                <div id="eventLog" class="bg-gray-800/50 rounded p-2 h-20 overflow-y-auto font-mono text-xs"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 0. 전역 설정 및 파라미터 분리
+        // ==========================================
+        const ROI_X_MIN = -3.0;
+        const ROI_X_MAX = 3.0;
+        const ROI_Y_MIN = 0.5;
+        
+        // 기존 전체(Flat) 차트용 5m 범위 유지
+        const FLAT_Y_MAX = 8.0; 
+        
+        // 실시간 프레임(Tracking) 전용 10m 범위
+        const TRACKING_Y_MAX = 10.0; 
+
+        // UI 요소
+        const fileInput = document.getElementById('fileInput');
+        const dropZone = document.getElementById('dropZone');
+        const alertBanner = document.getElementById('alertBanner');
+        const alertTitle = document.getElementById('alertTitle');
+        const alertMessage = document.getElementById('alertMessage');
+        const alertDetails = document.getElementById('alertDetails');
+        
+        // 다국어 메시지 딕셔너리
+        const messages = {
+            'ko': {
+                noData: "데이터가 없습니다.",
+                danger: "위험! 즉시 정지하세요.",
+                warning: "장애물 접근, 서행하세요.",
+                caution: "전방에 물체 감지.",
+                notice: "원거리에 장애물이 있습니다.",
+                safe: "장애물이 없습니다.",
+                detailSafe: (count) => `✅ 안전 주행 중... (의심 점: ${count}개이나 뭉치지 않음)`,
+                title: "상태 알림"
+            },
+            'en': {
+                noData: "No data available.",
+                danger: "Danger! Stop immediately.",
+                warning: "Obstacle approaching, slow down.",
+                caution: "Object detected ahead.",
+                notice: "Obstacle in the distance.",
+                safe: "No obstacles detected.",
+                detailSafe: (count) => `✅ Driving safely... (${count} points found but not clustered)`,
+                title: "Status Alert"
+            },
+            'ja': {
+                noData: "データがありません。",
+                danger: "危険！直ちに停止してください。",
+                warning: "障害物接近、徐行してください。",
+                caution: "前方に物体を検知。",
+                notice: "遠方に障害物があります。",
+                safe: "障害物はありません。",
+                detailSafe: (count) => `✅ 安全走行中... (疑わしい点: ${count}個、クラスターなし)`,
+                title: "ステータス通知"
+            }
+        };
+
+        const langCodes = { 'ko': 'ko-KR', 'en': 'en-US', 'ja': 'ja-JP' };
+        function getCurrentLang() { return document.querySelector('input[name="language"]:checked').value; }
+
+        // ==========================================
+        // 1. 파일 업로드 및 구글 드라이브
+        // ==========================================
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) processFile(e.target.files[0]);
+        });
+
+        function processFile(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const arrayBuffer = e.target.result;
+                
+                // Flat 차트용 처리
+                const points = parseRadarData(arrayBuffer);
+                analyzeData(points);
+                
+                // 프레임 재생기용 처리
+                radarFrames = parseRadarDataByFrame(arrayBuffer);
+                initFramePlayback();
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        const API_KEY = 'AIzaSyB2knYbA-PO03ar2J8vBIHxVF4GyPrbzg8'; 
+        const FOLDER_ID = '1g8iD-fa8IGWqF7JM5k9mIWjNSdCLF5Xq';
+        const driveFileList = document.getElementById('driveFileList');
+        const loadDriveBtn = document.getElementById('loadDriveBtn');
+
+        async function fetchDriveFilesSafe() {
+            if (!driveFileList) return;
+            const query = `'${FOLDER_ID}' in parents and trashed=false`;
+            const apiUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&key=${API_KEY}`;
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    if(response.status === 403) throw new Error('API 권한 오류. 드라이브 폴더가 비공개 상태일 수 있습니다.');
+                    throw new Error(`Drive API 호출 실패 (${response.status})`);
+                }
+                const data = await response.json();
+                const datFiles = data.files.filter(file => file.name.endsWith('.dat'));
+                
+                driveFileList.innerHTML = ''; 
+                if (datFiles.length === 0) {
+                    driveFileList.innerHTML = '<option value="">해당 폴더에 .dat 파일이 없습니다.</option>';
+                    return;
+                }
+                datFiles.forEach(file => {
+                    const option = document.createElement('option');
+                    option.value = file.id; 
+                    option.textContent = file.name;
+                    driveFileList.appendChild(option);
+                });
+            } catch (error) {
+                console.warn("구글 드라이브 목록 로드 실패:", error);
+                driveFileList.innerHTML = '<option value="">폴더 접근 실패 (콘솔 에러 확인)</option>';
+            }
+        }
+
+        if (loadDriveBtn) {
+            loadDriveBtn.addEventListener('click', async () => {
+                const fileId = driveFileList.value;
+                if (!fileId) {
+                    alert("파일을 먼저 선택해주세요.");
+                    return;
+                }
+                try {
+                    alertMessage.innerText = "데이터 다운로드 중...";
+                    alertDetails.innerText = "구글 드라이브에서 가져오는 중...";
+                    alertBanner.className = "p-6 rounded-xl shadow-md transition-colors duration-300 bg-blue-100 text-blue-800";
+                    
+                    const downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${API_KEY}`;
+                    const response = await fetch(downloadUrl);
+                    if (!response.ok) throw new Error(`다운로드 실패 (${response.status})`);
+                    
+                    const arrayBuffer = await response.arrayBuffer();
+                    
+                    const points = parseRadarData(arrayBuffer);
+                    analyzeData(points); 
+                    
+                    radarFrames = parseRadarDataByFrame(arrayBuffer);
+                    initFramePlayback();
+                    
+                } catch (error) {
+                    console.error("파일 처리 중 에러:", error);
+                    alert("데이터를 다운로드하지 못했습니다. 브라우저 콘솔을 확인하세요.");
+                    alertMessage.innerText = "다운로드 에러";
+                    alertDetails.innerText = "파일을 가져오지 못했습니다.";
+                    alertBanner.className = "p-6 rounded-xl shadow-md transition-colors duration-300 bg-red-100 text-red-800";
+                }
+            });
+        }
+        fetchDriveFilesSafe();
+
+
+        // ==========================================
+        // 2. Flat 전체 데이터 처리 (기존 5m 분석 로직 유지 + 다중 객체 추출 반영)
+        // ==========================================
+        function findMagicWord(uint8View, startOffset) {
+            const MAGIC_WORD = [0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07];
+            for (let i = startOffset; i <= uint8View.length - 8; i++) {
+                let match = true;
+                for (let j = 0; j < 8; j++) {
+                    if (uint8View[i + j] !== MAGIC_WORD[j]) { match = false; break; }
+                }
+                if (match) return i;
+            }
+            return -1;
+        }
+
+        function parseRadarData(arrayBuffer) {
+            const points = [];
+            const view = new DataView(arrayBuffer);
+            const uint8View = new Uint8Array(arrayBuffer);
+            let offset = 0;
+
+            while (offset < view.byteLength) {
+                const idx = findMagicWord(uint8View, offset);
+                if (idx === -1) break;
+
+                try {
+                    const totalPacketLen = view.getUint32(idx + 12, true);
+                    const numObj = view.getUint32(idx + 28, true);
+                    const numTlv = view.getUint32(idx + 32, true);
+                    let tlvPtr = idx + 40;
+
+                    for (let i = 0; i < numTlv; i++) {
+                        if (tlvPtr + 8 > view.byteLength) break; 
+                        
+                        const tType = view.getUint32(tlvPtr, true);
+                        const tLen = view.getUint32(tlvPtr + 4, true);
+
+                        if (tType === 1) { 
+                            const pointsStart = tlvPtr + 8;
+                            for (let j = 0; j < numObj; j++) {
+                                const pPos = pointsStart + (j * 16);
+                                if (pPos + 16 > view.byteLength) break;
+
+                                const x = view.getFloat32(pPos, true);
+                                const y = view.getFloat32(pPos + 4, true);
+                                const z = view.getFloat32(pPos + 8, true);
+                                const v = view.getFloat32(pPos + 12, true);
+
+                                // 업로드하신 Z축 -2.0 ~ 2.0 유지
+                                if (z >= -2.0 && z <= 2.0) {
+                                    // Z축 데이터를 추가하여 저장
+                                    points.push({ x: x, y: y, z: z, v: v });
+                                }
+                            }
+                        }
+                        tlvPtr += (8 + tLen);
+                    }
+                    offset = idx + totalPacketLen;
+                } catch (err) {
+                    offset = idx + 8;
+                }
+            }
+            return points;
+        }
+
+        function runDBSCAN(points, eps, minPts) {
+            const labels = new Array(points.length).fill(undefined);
+            let clusterId = 0;
+
+            function getNeighbors(pointIdx) {
+                const neighbors = [];
+                const p1 = points[pointIdx];
+                for (let i = 0; i < points.length; i++) {
+                    const p2 = points[i];
+                    const dist = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+                    if (dist <= eps) neighbors.push(i);
+                }
+                return neighbors;
+            }
+
+            for (let i = 0; i < points.length; i++) {
+                if (labels[i] !== undefined) continue;
+                const neighbors = getNeighbors(i);
+                if (neighbors.length < minPts) { labels[i] = -1; continue; }
+
+                clusterId++; labels[i] = clusterId;
+                const seedSet = neighbors.filter(n => n !== i);
+
+                for (let j = 0; j < seedSet.length; j++) {
+                    const currP = seedSet[j];
+                    if (labels[currP] === -1) labels[currP] = clusterId; 
+                    if (labels[currP] !== undefined) continue;
+                    
+                    labels[currP] = clusterId;
+                    const currNeighbors = getNeighbors(currP);
+                    
+                    if (currNeighbors.length >= minPts) {
+                        for(let k=0; k<currNeighbors.length; k++) {
+                            if(!seedSet.includes(currNeighbors[k])) seedSet.push(currNeighbors[k]);
+                        }
+                    }
+                }
+            }
+            return labels;
+        }
+
+        function analyzeData(points) {
+            const lang = getCurrentLang();
+            const msgDict = messages[lang];
+            alertTitle.innerText = msgDict.title;
+
+            if (points.length === 0) {
+                triggerAlert(msgDict.noData, "bg-gray-200", "text-gray-700", "");
+                speak(msgDict.noData, lang);
+                return;
+            }
+
+            const clusterEps = parseFloat(document.getElementById('clusterEps').value);
+            const minPointsInCluster = parseInt(document.getElementById('minPoints').value);
+
+            // 기존 Flat 분석을 위해 5m(FLAT_Y_MAX) 유지
+            const targetPoints = points.filter(p => 
+                p.y > ROI_Y_MIN && p.y < FLAT_Y_MAX && p.x > ROI_X_MIN && p.x < ROI_X_MAX
+            );
+
+            // [수정된 부분] 다중 클러스터(객체)를 배열로 담습니다.
+            let validClusters = [];
+
+            if (targetPoints.length >= minPointsInCluster) {
+                const labels = runDBSCAN(targetPoints, clusterEps, 5);
+                const counts = {};
+                labels.forEach(label => { if (label !== -1) counts[label] = (counts[label] || 0) + 1; });
+
+                for (const labelStr in counts) {
+                    if (counts[labelStr] >= minPointsInCluster) {
+                        const label = parseInt(labelStr);
+                        const clusterPts = targetPoints.filter((_, idx) => labels[idx] === label);
+                        validClusters.push(clusterPts);
+                    }
+                }
+                
+                // 거리가 가까운 객체 순서대로 정렬 (y값이 가장 작은 순서)
+                validClusters.sort((a, b) => Math.min(...a.map(p => p.y)) - Math.min(...b.map(p => p.y)));
+            }
+
+            if (validClusters.length > 0) {
+                // 경고 알람 기준은 '가장 가까운' 첫 번째 클러스터를 기준으로 삼습니다.
+                const closestCluster = validClusters[0];
+                const minDist = Math.min(...closestCluster.map(p => p.y));
+                const totalVelocity = closestCluster.reduce((sum, p) => sum + p.v, 0);
+                const avgVelocity = totalVelocity / closestCluster.length;
+
+                let msg = ""; let bgColor = ""; let textColor = "text-white";
+
+                if (minDist <= 1.0) { msg = msgDict.danger; bgColor = "bg-red-600"; }
+                else if (minDist <= 2.0) { msg = msgDict.warning; bgColor = "bg-orange-500"; }
+                else if (minDist <= 3.5) { msg = msgDict.caution; bgColor = "bg-yellow-400"; textColor = "text-gray-900"; }
+                else { msg = msgDict.notice; bgColor = "bg-blue-500"; }
+
+                const objCountText = validClusters.length > 1 ? `다중 객체(${validClusters.length}개) 감지!` : `단일 물체 감지!`;
+                let langObjText = lang === 'ko' ? objCountText : (lang === 'en' ? `Detected ${validClusters.length} objects!` : `${validClusters.length}個の物体を検知`);
+                
+                const detailMsg = `🚨 ${langObjText} (최소거리: ${minDist.toFixed(2)}m, 속도: ${avgVelocity.toFixed(2)}m/s)`;
+                triggerAlert(msg, bgColor, textColor, detailMsg);
+                speak(msg, lang);
+            } else {
+                const msg = msgDict.safe;
+                const detailMsg = msgDict.detailSafe(targetPoints.length);
+                triggerAlert(msg, "bg-green-500", "text-white", detailMsg);
+                speak(msg, lang);
+            }
+
+            drawChart(points, targetPoints, validClusters);
+        }
+
+        function triggerAlert(msg, bgColor, textColor, details) {
+            alertBanner.className = `p-6 rounded-xl shadow-md transition-colors duration-300 ${bgColor} ${textColor}`;
+            alertMessage.innerText = msg; alertDetails.innerText = details;
+        }
+
+        function speak(text, lang) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); 
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = langCodes[lang];
+                utterance.rate = (lang === 'en') ? 0.9 : 1.0;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // ==========================================
+        // 3. Flat Scatter Plot (Top-Down 및 Side-View 렌더링)
+        // ==========================================
+        function drawChart(allPoints, roiPoints, validClusters) {
+            // X-Y 축 (위에서 본 모습)
+            drawSubChart('#chartXY', 'x', 'y', allPoints, roiPoints, validClusters, 
+                         [-3, 3], [-0.5, 8.0], "Left/Right (X, m)", "Forward Distance (Y, m)");
+            // Y-Z 축 (옆에서 본 모습)
+            drawSubChart('#chartYZ', 'y', 'z', allPoints, roiPoints, validClusters, 
+                         [-0.5, 8.0], [-2.5, 2.5], "Forward Distance (Y, m)", "Height (Z, m)");
+        }
+
+        function drawSubChart(selector, xKey, yKey, allPoints, roiPoints, validClusters, xDomain, yDomain, xLabel, yLabel) {
+            const container = document.querySelector(selector);
+            if(!container) return;
+            container.innerHTML = ""; 
+            
+            const margin = {top: 20, right: 20, bottom: 45, left: 45};
+            const width = container.clientWidth || 350;
+            const height = container.clientHeight || 450; 
+            const innerWidth = width - margin.left - margin.right;
+            const innerHeight = height - margin.top - margin.bottom;
+
+            const svg = d3.select(selector).append("svg")
+                .attr("width", "100%")
+                .attr("height", "100%")
+                .attr("viewBox", `0 0 ${width} ${height}`)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            const xScale = d3.scaleLinear().domain(xDomain).range([0, innerWidth]);
+            const yScale = d3.scaleLinear().domain(yDomain).range([innerHeight, 0]);
+
+            const xAxisGrid = d3.axisBottom(xScale).tickSize(-innerHeight).tickFormat('').ticks(8);
+            const yAxisGrid = d3.axisLeft(yScale).tickSize(-innerWidth).tickFormat('').ticks(8);
+            
+            svg.append('g').attr('class', 'grid text-gray-200 stroke-current opacity-30').attr('transform', `translate(0,${innerHeight})`).call(xAxisGrid);
+            svg.append('g').attr('class', 'grid text-gray-200 stroke-current opacity-30').call(yAxisGrid);
+
+            svg.append("g").attr("transform", `translate(0,${innerHeight})`).call(d3.axisBottom(xScale));
+            svg.append("g").call(d3.axisLeft(yScale));
+
+            svg.append("text").attr("text-anchor", "middle").attr("x", innerWidth/2).attr("y", innerHeight + 35).text(xLabel).style("font-size", "11px").style("fill", "#4b5563");
+            svg.append("text").attr("text-anchor", "middle").attr("transform", "rotate(-90)").attr("y", -30).attr("x", -innerHeight/2).text(yLabel).style("font-size", "11px").style("fill", "#4b5563");
+
+            // 보조선 그리기 (ROI 기준점 및 0점)
+            if(yKey === 'y' && xKey === 'x') {
+                svg.append("line").attr("x1", 0).attr("x2", innerWidth)
+                   .attr("y1", yScale(ROI_Y_MIN)).attr("y2", yScale(ROI_Y_MIN))
+                   .attr("stroke", "red").attr("stroke-dasharray", "4").attr("stroke-width", 1).attr("opacity", 0.5);
+                svg.append("line").attr("x1", xScale(0)).attr("x2", xScale(0))
+                   .attr("y1", 0).attr("y2", innerHeight)
+                   .attr("stroke", "gray").attr("stroke-dasharray", "4").attr("stroke-width", 1).attr("opacity", 0.3);
+            } else if (xKey === 'y' && yKey === 'z') {
+                svg.append("line").attr("x1", xScale(ROI_Y_MIN)).attr("x2", xScale(ROI_Y_MIN))
+                   .attr("y1", 0).attr("y2", innerHeight)
+                   .attr("stroke", "red").attr("stroke-dasharray", "4").attr("stroke-width", 1).attr("opacity", 0.5);
+                svg.append("line").attr("x1", 0).attr("x2", innerWidth)
+                   .attr("y1", yScale(0)).attr("y2", yScale(0))
+                   .attr("stroke", "gray").attr("stroke-dasharray", "4").attr("stroke-width", 1).attr("opacity", 0.4);
+            }
+
+            // 노이즈 포인트
+            svg.append('g').selectAll("dot").data(allPoints).enter().append("circle")
+               .attr("cx", d => xScale(d[xKey])).attr("cy", d => yScale(d[yKey])).attr("r", 2).style("fill", "gray").style("opacity", 0.2);
+
+            // ROI 내의 타겟 포인트 (연한 파란색)
+            if(roiPoints && roiPoints.length > 0) {
+                svg.append('g').selectAll("dot").data(roiPoints).enter().append("circle")
+                   .attr("cx", d => xScale(d[xKey])).attr("cy", d => yScale(d[yKey])).attr("r", 3.5).style("fill", "#add8e6").style("opacity", 0.6);
+            }
+
+            // [수정된 부분] 다중 클러스터(추적)된 포인트 (각 객체마다 다른 색상 부여)
+            const colors = ["#ef4444", "#f97316", "#8b5cf6", "#10b981", "#3b82f6"]; // 빨강, 주황, 보라, 초록, 파랑 순
+            if(validClusters && validClusters.length > 0) {
+                validClusters.forEach((clusterPoints, index) => {
+                    const color = colors[index % colors.length];
+                    svg.append('g').selectAll("dot").data(clusterPoints).enter().append("circle")
+                       .attr("cx", d => xScale(d[xKey])).attr("cy", d => yScale(d[yKey])).attr("r", 5)
+                       .style("fill", color).style("stroke", "black").style("stroke-width", 1).style("opacity", 0.9);
+                });
+            }
+        }
+
+        // 초기 빈 차트 렌더링
+        drawChart([], [], []);
+
+
+        // ==========================================
+        // 4. 실시간 프레임 파싱 & 트래킹 로직 (10m)
+        // ==========================================
+        let radarFrames = [];           
+        let currentFrameIdx = 0;        
+        let framePlaybackInterval = null; 
+        let isFramePlaying = false;     
+
+        function parseRadarDataByFrame(arrayBuffer) {
+            const frames = [];
+            const view = new DataView(arrayBuffer);
+            const uint8View = new Uint8Array(arrayBuffer);
+            let offset = 0;
+
+            while (offset < view.byteLength) {
+                const idx = findMagicWord(uint8View, offset);
+                if (idx === -1) break;
+                try {
+                    const totalPacketLen = view.getUint32(idx + 12, true);
+                    const numObj = view.getUint32(idx + 28, true);
+                    const numTlv = view.getUint32(idx + 32, true);
+                    let tlvPtr = idx + 40;
+                    const framePoints = []; 
+
+                    for (let i = 0; i < numTlv; i++) {
+                        if (tlvPtr + 8 > view.byteLength) break; 
+                        const tType = view.getUint32(tlvPtr, true);
+                        const tLen = view.getUint32(tlvPtr + 4, true);
+
+                        if (tType === 1) { 
+                            const pointsStart = tlvPtr + 8;
+                            for (let j = 0; j < numObj; j++) {
+                                const pPos = pointsStart + (j * 16);
+                                if (pPos + 16 > view.byteLength) break;
+                                const x = view.getFloat32(pPos, true);
+                                const y = view.getFloat32(pPos + 4, true);
+                                const z = view.getFloat32(pPos + 8, true);
+                                const v = view.getFloat32(pPos + 12, true);
+                                
+                                // Z축 데이터를 추가하여 저장
+                                if (z >= -2.0 && z <= 2.0) framePoints.push({ x, y, z, v });
+                            }
+                        }
+                        tlvPtr += (8 + tLen);
+                    }
+                    frames.push(framePoints); 
+                    offset = idx + totalPacketLen;
+                } catch (err) { offset = idx + 8; }
+            }
+            return frames;
+        }
+
+        // --- D3 프레임 차트 셋업 (Y축 10m) ---
+        let frameSvg, frameXScale, frameYScale;
+        const frameMargin = {top: 20, right: 20, bottom: 40, left: 40};
+        
+        function initFrameChart() {
+            const container = document.getElementById('frameChart'); container.innerHTML = ""; 
+            const width = container.clientWidth || 400; const height = 400;
+            const innerWidth = width - frameMargin.left - frameMargin.right;
+            const innerHeight = height - frameMargin.top - frameMargin.bottom;
+
+            frameSvg = d3.select("#frameChart").append("svg").attr("width", "100%").attr("height", height)
+                .attr("viewBox", `0 0 ${width} ${height}`).append("g").attr("transform", `translate(${frameMargin.left},${frameMargin.top})`);
+
+            frameXScale = d3.scaleLinear().domain([-1.5, 1.5]).range([0, innerWidth]);
+            // 프레임 전용 10m 설정 적용
+            frameYScale = d3.scaleLinear().domain([-0.5, TRACKING_Y_MAX]).range([innerHeight, 0]); 
+
+            frameSvg.append("g").attr("transform", `translate(0,${innerHeight})`).call(d3.axisBottom(frameXScale));
+            frameSvg.append("g").call(d3.axisLeft(frameYScale));
+            frameSvg.append("path").attr("d", d3.symbol().type(d3.symbolTriangle).size(80)).attr("transform", `translate(${frameXScale(0)},${frameYScale(0)})`).style("fill", "black");
+            frameSvg.append("g").attr("class", "dots-layer");
+        }
+
+        function updateFrameD3Chart(points) {
+            if (!frameSvg) return;
+            const dots = frameSvg.select(".dots-layer").selectAll("circle").data(points);
+            dots.exit().remove();
+            dots.enter().append("circle").merge(dots)
+                .attr("cx", d => frameXScale(d.x)).attr("cy", d => frameYScale(d.y)).attr("r", 4)
+                .style("fill", d => (d.y > ROI_Y_MIN && d.y < TRACKING_Y_MAX && d.x > ROI_X_MIN && d.x < ROI_X_MAX) ? "#4f46e5" : "#9ca3af")
+                .style("opacity", 0.7);
+        }
+
+        // --- 프레임 10m 트래킹 프로세싱 ---
+        function processTrackingForFrame(points) {
+            if (!points || points.length === 0) return { objects: [], mySpeed: 0 };
+            const clusterEps = parseFloat(document.getElementById('clusterEps').value);
+            const minPts = parseInt(document.getElementById('minPoints').value);
+
+            // 프레임 전용 10m(TRACKING_Y_MAX)로 필터링
+            const roi = points.filter(p => p.y > ROI_Y_MIN && p.y < TRACKING_Y_MAX && p.x > ROI_X_MIN && p.x < ROI_X_MAX);
+            if (roi.length === 0) return { objects: [], mySpeed: 0 };
+
+            const labels = runDBSCAN(roi, clusterEps, 5); 
+            const clusterMap = {};
+            labels.forEach((lbl, i) => {
+                if (lbl === -1) return;
+                if (!clusterMap[lbl]) clusterMap[lbl] = [];
+                clusterMap[lbl].push(roi[i]);
+            });
+
+            const clusters = Object.entries(clusterMap)
+                .filter(([, pts]) => pts.length >= minPts)
+                .map(([id, pts]) => {
+                    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+                    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+                    const avgV = pts.reduce((s, p) => s + p.v, 0) / pts.length;
+                    return { id: parseInt(id), centroidX: cx, centroidY: cy, velocity: avgV, count: pts.length };
+                })
+                .sort((a, b) => a.centroidY - b.centroidY);
+
+            if (clusters.length === 0) return { objects: [], mySpeed: 0 };
+
+            const primaryDist = clusters[0].centroidY;
+            const classifiedObjects = clusters.map((cl, i) => {
+                let label = (i === 0) ? 'Tracked Object' : (cl.centroidY - primaryDist > 2.0) ? 'New Object' : 'Noise';
+                let color = (label === 'Tracked Object') ? '#ef4444' : (label === 'New Object') ? '#f59e0b' : '#6b7280';
+                return { ...cl, label, color };
+            });
+
+            // 속도 0.0 해결 로직 (임계값 0.02로 대폭 완화)
+            let mySpeed = Math.abs(clusters[0].velocity);
+            if (isNaN(mySpeed) || mySpeed < 0.02) {
+                mySpeed = 0;
+            }
+            
+            return { objects: classifiedObjects, mySpeed };
+        }
+
+        // --- Top-Down 캔버스 (원시 데이터 + 10m 반영) ---
+        let currentAlertLevel = null;
+
+        function drawTopDownCanvas(trackingInfo, rawPoints) {
+            const canvas = document.getElementById('trackingCanvas');
+            if(!canvas) return;
+            const W = canvas.parentElement.clientWidth;
+            const H = canvas.parentElement.clientHeight || 400;
+            canvas.width = W; canvas.height = H;
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, W, H);
+
+            const PAD_T = 30, PAD_B = 50;
+            const plotH = H - PAD_T - PAD_B;
+            const LANE_X = W / 2;
+            const roadWidth = Math.min(W * 0.8, 300);
+
+            // 매핑: 프레임 전용 10m 범위(TRACKING_Y_MAX) 반영
+            const distToY = d => (H - PAD_B) - (d / TRACKING_Y_MAX) * plotH;
+            const latToX = latX => LANE_X + (latX / ROI_X_MAX) * (roadWidth / 2);
+
+            // 1. 도로
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath(); ctx.roundRect(LANE_X - roadWidth/2, PAD_T, roadWidth, plotH + 20, 4); ctx.fill();
+            
+            ctx.setLineDash([6, 6]); ctx.strokeStyle = '#374151'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(LANE_X, PAD_T); ctx.lineTo(LANE_X, H - PAD_B + 20); ctx.stroke();
+            ctx.setLineDash([]);
+
+            // 경보 마커
+            const alertZones = [{d:1.0, c:'#ef4444'}, {d:2.0, c:'#f97316'}, {d:3.5, c:'#eab308'}];
+            alertZones.forEach(z => {
+                const y = distToY(z.d);
+                if (y > PAD_T && y < H - PAD_B) {
+                    ctx.strokeStyle = z.c; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+                    ctx.beginPath(); ctx.moveTo(LANE_X - roadWidth/2, y); ctx.lineTo(LANE_X + roadWidth/2, y); ctx.stroke();
+                    ctx.globalAlpha = 1;
+                }
+            });
+
+            // 2. 실시간 10m 원시 데이터 점(Raw Dots) 그리기
+            if(rawPoints && rawPoints.length > 0) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                rawPoints.forEach(p => {
+                    // TRACKING_Y_MAX(10m) 이내의 점들만 렌더링
+                    if(p.y >= 0 && p.y <= TRACKING_Y_MAX && p.x >= ROI_X_MIN && p.x <= ROI_X_MAX) {
+                        const px = latToX(p.x);
+                        const py = distToY(p.y);
+                        
+                        ctx.beginPath();
+                        ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                });
+            }
+
+            // 3. 내 차량 (ME)
+            const carW = 16, carH = 28;
+            const carY = H - PAD_B;
+            ctx.fillStyle = '#67e8f9'; ctx.shadowColor = '#67e8f9'; ctx.shadowBlur = 8;
+            ctx.beginPath(); ctx.roundRect(LANE_X - carW/2, carY - carH/2, carW, carH, 3); ctx.fill();
+            ctx.shadowBlur = 0;
+            
+            // 4. 추적 오브젝트 Bounding Box
+            let minTrackedDist = 999;
+            trackingInfo.objects.forEach(obj => {
+                const y = distToY(obj.centroidY);
+                const x = latToX(obj.centroidX);
+                
+                if(obj.label === 'Tracked Object') minTrackedDist = Math.min(minTrackedDist, obj.centroidY);
+
+                const isNoise = obj.label === 'Noise';
+                const objW = isNoise ? 10 : 20, objH = isNoise ? 10 : 14;
+                
+                ctx.globalAlpha = isNoise ? 0.4 : 0.8;
+                ctx.fillStyle = obj.color;
+                ctx.beginPath(); ctx.roundRect(x - objW/2, y - objH/2, objW, objH, 3); ctx.fill();
+                
+                if (!isNoise) {
+                    ctx.fillStyle = '#ffffff'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+                    ctx.fillText(`${obj.centroidY.toFixed(1)}m`, x, y - objH/2 - 4);
+                }
+                ctx.globalAlpha = 1;
+            });
+
+            // 로그 업데이트
+            let newLevel = null;
+            if (minTrackedDist <= 1.0) newLevel = 'danger';
+            else if (minTrackedDist <= 2.0) newLevel = 'warning';
+            else if (minTrackedDist <= 3.5) newLevel = 'caution';
+
+            if (newLevel && newLevel !== currentAlertLevel) {
+                currentAlertLevel = newLevel;
+                const logEl = document.getElementById('eventLog');
+                let color = newLevel==='danger'?'#ef4444':newLevel==='warning'?'#f97316':'#eab308';
+                let msg = newLevel==='danger'?`🚨 1.0m 이내 진입!`:newLevel==='warning'?`⚠️ 2.0m 돌파`:`💛 3.5m 접근`;
+                
+                const t = document.createElement('div');
+                t.style.color = color; t.textContent = `[F:${currentFrameIdx}] ${msg} (${minTrackedDist.toFixed(1)}m)`;
+                logEl.appendChild(t); logEl.scrollTop = logEl.scrollHeight;
+            } else if (minTrackedDist > 3.5) {
+                currentAlertLevel = null;
+            }
+        }
+
+        function updateUIforFrame() {
+            const slider = document.getElementById('frameSlider');
+            slider.value = currentFrameIdx;
+            document.getElementById('frameCounter').textContent = `${currentFrameIdx + 1} / ${radarFrames.length} Frame`;
+            
+            const currentPoints = radarFrames[currentFrameIdx] || [];
+            
+            updateFrameD3Chart(currentPoints);
+            
+            const trackingInfo = processTrackingForFrame(currentPoints);
+            // 소수점 2자리로 세밀하게 출력되도록 수정
+            document.getElementById('speedBadge').textContent = `속도: ${trackingInfo.mySpeed.toFixed(2)} m/s`; 
+            
+            document.getElementById('objectTable').innerHTML = trackingInfo.objects.map(o => `
+                <div class="flex items-center justify-between text-[10px] mb-1">
+                    <div class="flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full" style="background:${o.color}"></span>
+                        <span class="text-gray-300">${o.label}</span>
+                    </div>
+                    <span class="text-gray-400">전방 ${o.centroidY.toFixed(1)}m | 측면 ${o.centroidX.toFixed(1)}m</span>
+                </div>
+            `).join('');
+
+            drawTopDownCanvas(trackingInfo, currentPoints);
+        }
+
+        // --- 컨트롤 ---
+        function initFramePlayback() {
+            if (!radarFrames || radarFrames.length === 0) return;
+            document.getElementById('framePlaybackSection').style.display = 'block';
+            document.getElementById('eventLog').innerHTML = '';
+            
+            initFrameChart();
+            currentFrameIdx = 0; currentAlertLevel = null;
+            document.getElementById('frameSlider').max = radarFrames.length - 1;
+            pauseFrames();
+            updateUIforFrame();
+        }
+
+        function playFrames() {
+            if (isFramePlaying) return;
+            isFramePlaying = true;
+            document.getElementById('framePlayPauseBtn').textContent = "⏸ 일시정지";
+            const fps = parseInt(document.getElementById('frameFpsInput').value) || 10;
+            framePlaybackInterval = setInterval(() => {
+                currentFrameIdx++;
+                if (currentFrameIdx >= radarFrames.length) currentFrameIdx = 0; 
+                updateUIforFrame();
+            }, 1000 / fps);
+        }
+
+        function pauseFrames() {
+            isFramePlaying = false;
+            document.getElementById('framePlayPauseBtn').textContent = "▶ 재생";
+            if (framePlaybackInterval) clearInterval(framePlaybackInterval);
+        }
+
+        document.getElementById('framePlayPauseBtn').addEventListener('click', () => isFramePlaying ? pauseFrames() : playFrames());
+        document.getElementById('frameStopBtn').addEventListener('click', () => { pauseFrames(); currentFrameIdx = 0; currentAlertLevel=null; updateUIforFrame(); });
+        document.getElementById('frameSlider').addEventListener('input', (e) => { pauseFrames(); currentFrameIdx = parseInt(e.target.value); updateUIforFrame(); });
+        document.getElementById('frameFpsInput').addEventListener('change', () => { if (isFramePlaying) { pauseFrames(); playFrames(); } });
+
+    </script>
+</body>
+</html>
