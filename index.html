@@ -536,10 +536,10 @@
         function drawChart(allPoints, roiPoints, clusterPoints) {
             // X-Y 축 (위에서 본 모습)
             drawSubChart('#chartXY', 'x', 'y', allPoints, roiPoints, clusterPoints, 
-                         [-3, 3], [-0.5, 5.5], "Left/Right (X, m)", "Forward Distance (Y, m)");
+                         [-3, 3], [-0.5, 8.0], "Left/Right (X, m)", "Forward Distance (Y, m)");
             // Y-Z 축 (옆에서 본 모습)
             drawSubChart('#chartYZ', 'y', 'z', allPoints, roiPoints, clusterPoints, 
-                         [-0.5, 5.5], [-2.5, 2.5], "Forward Distance (Y, m)", "Height (Z, m)");
+                         [-0.5, 8.0], [-2.5, 2.5], "Forward Distance (Y, m)", "Height (Z, m)");
         }
 
         function drawSubChart(selector, xKey, yKey, allPoints, roiPoints, clusterPoints, xDomain, yDomain, xLabel, yLabel) {
